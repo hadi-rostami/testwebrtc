@@ -1,83 +1,28 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Voice Call</title>
-</head>
-<body>
-  <h1>Voice Call</h1>
-  <button id="startCall">Start Call</button>
-  <p>Status: <span id="status">Idle</span></p>
-  <script>
-    const socket = new WebSocket("wss://soket-app.liara.run/"); // آدرس WebSocket شما
-    const peerConnection = new RTCPeerConnection({
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }], // سرور STUN گوگل
-    });
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WebRTC Connect and Mute</title>
+    <link rel="stylesheet" href="./style/style.css" />
+  </head>
+  <body>
+    <div class="container">
+      <h1 class="title">valheim server</h1>
+      <button id="muteButton">
+        <img
+          class="iconButton"
+          width="80px"
+          src="./images/microphone-solid.png"
+          alt=""
+        />
+      </button>
 
-    const status = document.getElementById("status");
+      <div class="users">
 
-    let localStream;
-
-    // 1. درخواست دسترسی به میکروفون
-    document.getElementById("startCall").addEventListener("click", async () => {
-      try {
-        localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        localStream.getTracks().forEach((track) => {
-          peerConnection.addTrack(track, localStream);
-        });
-        status.textContent = "Starting call...";
-        startSignaling();
-      } catch (err) {
-        console.error("Error accessing microphone:", err);
-      }
-    });
-
-    // 2. تنظیم WebSocket برای دریافت پیام‌های سیگنالینگ
-    socket.onmessage = async (event) => {
-      const data = JSON.parse(event.data);
-
-      if (data.type === "offer") {
-        status.textContent = "Receiving call...";
-        await peerConnection.setRemoteDescription(new RTCSessionDescription(data));
-        const answer = await peerConnection.createAnswer();
-        await peerConnection.setLocalDescription(answer);
-        socket.send(JSON.stringify(peerConnection.localDescription));
-      } else if (data.type === "answer") {
-        status.textContent = "Call connected";
-        await peerConnection.setRemoteDescription(new RTCSessionDescription(data));
-      } else if (data.type === "candidate") {
-        await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
-      }
-    };
-
-    // 3. تبادل ICE Candidates
-    peerConnection.onicecandidate = (event) => {
-      if (event.candidate) {
-        socket.send(
-          JSON.stringify({
-            type: "candidate",
-            candidate: event.candidate,
-          })
-        );
-      }
-    };
-
-    // 4. ارسال و دریافت استریم صوتی
-    peerConnection.ontrack = (event) => {
-      const remoteAudio = new Audio();
-      remoteAudio.srcObject = event.streams[0];
-      remoteAudio.play();
-    };
-
-    // 5. ایجاد Offer برای شروع تماس
-    async function startSignaling() {
-      const offer = await peerConnection.createOffer();
-      await peerConnection.setLocalDescription(offer);
-
-      socket.send(JSON.stringify(peerConnection.localDescription));
-      status.textContent = "Call initiated, waiting for response...";
-    }
-  </script>
-</body>
+      </div>
+    </div>
+    <!-- <script src="app.js"></script> -->
+    <script src="js/script.js"></script>
+  </body>
 </html>
