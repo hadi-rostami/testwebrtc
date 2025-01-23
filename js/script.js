@@ -38,6 +38,27 @@ function toggleMute() {
   console.log("Audio track enabled:", audioTrack.enabled);
 }
 
+function waitForWebSocketOpen() {
+  return new Promise((resolve, reject) => {
+    if (socket.readyState === WebSocket.OPEN) {
+      resolve();
+    } else {
+      socket.onopen = () => resolve();
+      socket.onerror = (error) => reject(error);
+    }
+  });
+}
+
+async function sendMessage(message) {
+  try {
+    // منتظر بمانید تا WebSocket متصل شود
+    await waitForWebSocketOpen();
+    socket.send(JSON.stringify(message));
+  } catch (error) {
+    console.error("Error during WebSocket communication:", error);
+  }
+}
+
 muteButton.addEventListener("click", toggleMute);
 
 // پیام‌های WebSocket
@@ -79,13 +100,10 @@ socket.onmessage = async (event) => {
               class="avatar"
               width="50px"
               src="images/user-circle-solid.png"
-              alt=""
-              />
+              alt=""/>
               </div>`
         );
       }
-      console.log();
-
       break;
 
     case "newUser":
@@ -138,15 +156,19 @@ const connectToWebRTC = async () => {
 
 // ایجاد Offer برای شروع تماس
 async function startSignaling() {
-  const offer = await peerConnection.createOffer();
-  await peerConnection.setLocalDescription(offer);
-  socket.send(JSON.stringify(peerConnection.localDescription));
+  try {
+    // منتظر بمانید تا WebSocket متصل شود
+    await waitForWebSocketOpen();
+
+    const offer = await peerConnection.createOffer();
+    await peerConnection.setLocalDescription(offer);
+
+    // حالا که WebSocket آماده است، پیام را ارسال کنید
+    socket.send(JSON.stringify(peerConnection.localDescription));
+  } catch (error) {
+    console.error("Error during WebSocket communication:", error);
+  }
 }
 
 // زمانی که صفحه لود می‌شود، اتصال WebRTC برقرار می‌شود
-window.onload = () => {
-  connectToWebRTC();
-
-  // ارسال پیام به سرور برای نشان دادن اتصال جدید
-  socket.send(JSON.stringify({ type: "newUser" }));
-};
+window.onload = connectToWebRTC
