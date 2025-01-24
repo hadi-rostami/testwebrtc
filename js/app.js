@@ -136,14 +136,21 @@ function updateUsersList(clientIds) {
 }
 
 async function handleOffer(message) {
-    console.log(message);
-    
-  const peerConnection = createPeerConnection(message.senderId);
+  console.log(message);
 
-  // چک کردن اینکه peerConnection معتبر است
+  let peerConnection = peerConnections[message.senderId];
+
+  if (!peerConnection) {
+    peerConnection = createPeerConnection(message.senderId);
+  }
+
   await peerConnection.setRemoteDescription(
     new RTCSessionDescription(message.offer)
   );
+
+  const answer = await peerConnection.createAnswer();
+  await peerConnection.setLocalDescription(answer);
+  sendMessage({ type: "answer", answer: peerConnection.localDescription });
 }
 
 function handleAnswer(message) {
