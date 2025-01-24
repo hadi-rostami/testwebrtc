@@ -1,16 +1,16 @@
 const muteButton = document.getElementById("muteButton");
 const iconButton = document.querySelector(".iconButton");
-const usersCon = document.querySelector(".users");
+const usersCon = document.getElementById("users");
 
-const socket = new WebSocket("wss://soket-app.liara.run/"); // آدرس WebSocket شما
-const peerConnection = new RTCPeerConnection({
-  iceServers: [{ urls: "stun:stun.l.google.com:19302" }], // سرور STUN گوگل
-});
+// آدرس WebSocket سرور خود را قرار دهید
+const socket = new WebSocket("wss://soket-app.liara.run/");
 
 let localStream;
 let isMuted = false;
+let myId;
+const peers = {}; // برای مدیریت PeerConnection‌ها
 
-// مدیریت تغییرات دکمه میوت
+// مدیریت میکروفون
 function toggleMute() {
   if (!localStream) {
     console.error("Local stream not loaded!");
@@ -23,11 +23,9 @@ function toggleMute() {
     return;
   }
 
-  // تغییر وضعیت میوت
   audioTrack.enabled = !audioTrack.enabled;
   isMuted = !isMuted;
 
-  // تغییر آیکون دکمه
   iconButton.setAttribute(
     "src",
     audioTrack.enabled
@@ -38,6 +36,7 @@ function toggleMute() {
   console.log("Audio track enabled:", audioTrack.enabled);
 }
 
+// مدیریت اتصال WebSocket
 function waitForWebSocketOpen() {
   return new Promise((resolve, reject) => {
     if (socket.readyState === WebSocket.OPEN) {
@@ -49,9 +48,9 @@ function waitForWebSocketOpen() {
   });
 }
 
+// ارسال پیام از طریق WebSocket
 async function sendMessage(message) {
   try {
-    // منتظر بمانید تا WebSocket متصل شود
     await waitForWebSocketOpen();
     socket.send(JSON.stringify(message));
   } catch (error) {
@@ -59,56 +58,63 @@ async function sendMessage(message) {
   }
 }
 
-muteButton.addEventListener("click", toggleMute);
-
-// پیام‌های WebSocket
+// مدیریت پیام‌های دریافتی از WebSocket
 socket.onmessage = async (event) => {
   const data = JSON.parse(event.data);
 
   switch (data.type) {
+    case "id":
+      myId = data.id;
+      console.log(`My ID: ${myId}`);
+      break;
+
     case "offer":
-      await peerConnection.setRemoteDescription(
+      if (!peers[data.senderId]) {
+        peers[data.senderId] = createPeerConnection(data.senderId);
+      }
+      await peers[data.senderId].setRemoteDescription(
         new RTCSessionDescription(data)
       );
-      const answer = await peerConnection.createAnswer();
-      await peerConnection.setLocalDescription(answer);
-      socket.send(JSON.stringify(peerConnection.localDescription));
+      const answer = await peers[data.senderId].createAnswer();
+      await peers[data.senderId].setLocalDescription(answer);
+      sendMessage({
+        type: "answer",
+        sdp: peers[data.senderId].localDescription.sdp,
+        senderId: myId,
+        receiverId: data.senderId,
+      });
       break;
 
     case "answer":
-      await peerConnection.setRemoteDescription(
-        new RTCSessionDescription(data)
-      );
+      if (peers[data.senderId]) {
+        await peers[data.senderId].setRemoteDescription(
+          new RTCSessionDescription(data)
+        );
+      }
       break;
 
     case "candidate":
-      await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
-      break;
-
-    case "clientsList":
-      const date = new Date().toLocaleTimeString();
-      usersCon.innerHTML = "";
-      for (let user of data.clientIds) {
-        usersCon.insertAdjacentHTML(
-          "beforeend",
-          `<div class="user">
-              <div class="">
-              <p class="id">${user}</p>
-              <p class="time">${date}</p>
-              </div>
-              <img
-              class="avatar"
-              width="50px"
-              src="images/user-circle-solid.png"
-              alt=""/>
-              </div>`
+      if (peers[data.senderId]) {
+        await peers[data.senderId].addIceCandidate(
+          new RTCIceCandidate(data.candidate)
         );
       }
       break;
 
     case "newUser":
-      console.log("A new user has joined");
-      // await connectToWebRTC(); // وقتی کاربر جدید می‌آید اتصال WebRTC برقرار می‌شود
+      if (!peers[data.senderId]) {
+        const peer = createPeerConnection(data.senderId);
+        peers[data.senderId] = peer;
+        startSignaling(peer, data.senderId);
+      }
+      break;
+
+    case "userDisconnected":
+      if (peers[data.senderId]) {
+        peers[data.senderId].close();
+        delete peers[data.senderId];
+        console.log(`User ${data.senderId} disconnected`);
+      }
       break;
 
     default:
@@ -116,22 +122,37 @@ socket.onmessage = async (event) => {
   }
 };
 
-peerConnection.onicecandidate = (event) => {
-  if (event.candidate) {
-    socket.send(
-      JSON.stringify({ type: "candidate", candidate: event.candidate })
-    );
-  }
-};
+// ایجاد یک PeerConnection جدید
+function createPeerConnection(userId) {
+  const peer = new RTCPeerConnection({
+    iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+  });
 
-// ارسال و دریافت استریم صوتی
-peerConnection.ontrack = (event) => {
-  const remoteAudio = new Audio();
-  remoteAudio.srcObject = event.streams[0];
-  remoteAudio.play();
-};
+  peer.onicecandidate = (event) => {
+    if (event.candidate) {
+      sendMessage({
+        type: "candidate",
+        candidate: event.candidate,
+        senderId: myId,
+        receiverId: userId,
+      });
+    }
+  };
 
-// شروع تماس WebRTC
+  peer.ontrack = (event) => {
+    const remoteAudio = new Audio();
+    remoteAudio.srcObject = event.streams[0];
+    remoteAudio.play();
+  };
+
+  localStream.getTracks().forEach((track) => {
+    peer.addTrack(track, localStream);
+  });
+
+  return peer;
+}
+
+// شروع استریم محلی
 const connectToWebRTC = async () => {
   try {
     localStream = await navigator.mediaDevices.getUserMedia({
@@ -142,33 +163,30 @@ const connectToWebRTC = async () => {
       },
       video: false,
     });
-
-    localStream.getTracks().forEach((track) => {
-      peerConnection.addTrack(track, localStream);
-    });
-
-    startSignaling();
+    console.log("Local stream initialized");
   } catch (err) {
     console.error("Failed to access user media", err);
-    setTimeout(connectToWebRTC, 1000); // تلاش مجدد در صورت خطا
+    setTimeout(connectToWebRTC, 1000);
   }
 };
 
-// ایجاد Offer برای شروع تماس
-async function startSignaling() {
-  try {
-    // منتظر بمانید تا WebSocket متصل شود
-    await waitForWebSocketOpen();
+// شروع ایجاد Offer برای یک کاربر
+async function startSignaling(peer, userId) {
+  const offer = await peer.createOffer();
+  await peer.setLocalDescription(offer);
 
-    const offer = await peerConnection.createOffer();
-    await peerConnection.setLocalDescription(offer);
-
-    // حالا که WebSocket آماده است، پیام را ارسال کنید
-    socket.send(JSON.stringify(peerConnection.localDescription));
-  } catch (error) {
-    console.error("Error during WebSocket communication:", error);
-  }
+  sendMessage({
+    type: "offer",
+    sdp: peer.localDescription.sdp,
+    senderId: myId,
+    receiverId: userId,
+  });
 }
 
-// زمانی که صفحه لود می‌شود، اتصال WebRTC برقرار می‌شود
-window.onload = connectToWebRTC
+// مدیریت کلیک دکمه میوت
+muteButton.addEventListener("click", toggleMute);
+
+// شروع کار هنگام بارگذاری صفحه
+window.onload = async () => {
+  await connectToWebRTC();
+};
