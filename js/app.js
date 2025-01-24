@@ -7,12 +7,15 @@ const socket = new WebSocket("wss://soket-app.liara.run/");
 let peerConnections = {};
 let localStream;
 let isMuted = false;
+let myID;
 
 socket.onmessage = (event) => {
   const message = JSON.parse(event.data);
 
   switch (message.type) {
     case "id":
+      myID = message.id;
+
       console.log("Your client ID:", message.id);
       break;
 
@@ -85,33 +88,28 @@ function toggleMute() {
   console.log("Audio track enabled:", audioTrack.enabled);
 }
 
-function createPeerConnection(userId) {
+function createPeerConnection(userId, type = undefined) {
   const peerConnection = new RTCPeerConnection();
   peerConnections[userId] = peerConnection;
-
   localStream
     .getTracks()
     .forEach((track) => peerConnection.addTrack(track, localStream));
 
   peerConnection.onicecandidate = (event) => {
     if (event.candidate) {
-      socket.send(
-        JSON.stringify({
-          type: "candidate",
-          candidate: event.candidate,
-          senderId: userId,
-        })
-      );
+      sendMessage({ type: "candidate", candidate: event.candidate });
     }
   };
 
   peerConnection.ontrack = (event) => {
-    const remoteVideo = document.createElement("video");
-    remoteVideo.srcObject = event.streams[0];
-    remoteVideo.play();
-    document.body.appendChild(remoteVideo);
+    const remoteAudio = new Audio();
+    remoteAudio.srcObject = event.streams[0];
+    remoteAudio.play();
   };
-
+  if (type === "offer")
+    return peerConnection.createOffer().then((offer) => {
+      return offer;
+    });
   return peerConnection;
 }
 
@@ -137,23 +135,20 @@ function updateUsersList(clientIds) {
   }
 }
 
-function handleOffer(message) {
+async function handleOffer(message) {
+    console.log(message);
+    
   const peerConnection = createPeerConnection(message.senderId);
 
-  peerConnection.setRemoteDescription(new RTCSessionDescription(message.offer));
-  peerConnection
-    .createAnswer()
-    .then((answer) => {
-      peerConnection.setLocalDescription(answer);
-
-      socket.send(JSON.stringify({ type: "answer", answer }));
-    })
-    .catch((error) => {
-      console.error("Failed to create answer:", error);
-    });
+  // چک کردن اینکه peerConnection معتبر است
+  await peerConnection.setRemoteDescription(
+    new RTCSessionDescription(message.offer)
+  );
 }
 
 function handleAnswer(message) {
+  console.log(peerConnections);
+
   const peerConnection = peerConnections[message.senderId];
   peerConnection.setRemoteDescription(
     new RTCSessionDescription(message.answer)
@@ -161,6 +156,8 @@ function handleAnswer(message) {
 }
 
 function handleCandidate(message) {
+  console.log(message, peerConnections);
+
   const peerConnection = peerConnections[message.senderId];
   peerConnection.addIceCandidate(new RTCIceCandidate(message.candidate));
 }
@@ -176,37 +173,15 @@ const connectToWebRTC = async () => {
       video: false,
     });
 
-    startSignaling();
+    sendMessage({
+      type: "offer",
+      offer: await createPeerConnection(myID, "offer"),
+    });
   } catch (err) {
     console.error("Failed to access user media", err);
     setTimeout(connectToWebRTC, 1000);
   }
 };
-async function startSignaling() {
-  try {
-    await waitForWebSocketOpen();
-    sendMessage({
-      type: "offer",
-      offer: await createOffer(),
-    });
-  } catch (error) {
-    console.error("Error during WebSocket communication:", error);
-  }
-}
-
-function createOffer() {
-  const peerConnection = new RTCPeerConnection();
-
-  localStream.getTracks().forEach((track) => {
-    peerConnection.addTrack(track, localStream);
-  });
-  peerConnection.createOffer().then(async (offer) => {
-    await peerConnection.setLocalDescription(offer);
-    sendMessage({ type: "offer", offer });
-  });
-
-  return peerConnection;
-}
 
 muteButton.addEventListener("click", toggleMute);
 window.onload = connectToWebRTC;
