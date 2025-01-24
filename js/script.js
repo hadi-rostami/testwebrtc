@@ -108,7 +108,7 @@ socket.onmessage = async (event) => {
 
     case "newUser":
       console.log("A new user has joined");
-      await connectToWebRTC(); // وقتی کاربر جدید می‌آید اتصال WebRTC برقرار می‌شود
+      // await connectToWebRTC(); // وقتی کاربر جدید می‌آید اتصال WebRTC برقرار می‌شود
       break;
 
     default:
